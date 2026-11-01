@@ -1,0 +1,27 @@
+# Gradle and Android build output
+.gradle/
+**/build/
+local.properties
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.DS_Store
+
+# Signing material and local credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.key
+.env
+.env.*
+
+# Vite companion preview
+node_modules/
+dist/
+
+# Local build logs
+build-*.log

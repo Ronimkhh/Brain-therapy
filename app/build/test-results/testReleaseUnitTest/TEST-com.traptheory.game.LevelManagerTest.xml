@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.traptheory.game.LevelManagerTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-01T16:41:29" hostname="e2b.local" time="0.048">
+  <properties/>
+  <testcase name="everyCampaignPuzzleHasItsOwnTitleAndHint" classname="com.traptheory.game.LevelManagerTest" time="0.038"/>
+  <testcase name="campaignContainsFortyFiveLevelsAcrossFiveWorlds" classname="com.traptheory.game.LevelManagerTest" time="0.005"/>
+  <testcase name="secretRoomsAndEndlessGenerationAreAvailable" classname="com.traptheory.game.LevelManagerTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

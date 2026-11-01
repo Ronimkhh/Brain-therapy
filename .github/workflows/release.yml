@@ -1,0 +1,131 @@
+name: Publish Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version or tag, for example 1.0.0 or v1.0.0
+        required: true
+        default: 1.0.0
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses and install platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Prepare optional signing key
+        id: signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_STORE_PASSWORD" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            KEYSTORE_PATH="$RUNNER_TEMP/trap-theory-release.jks"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+            {
+              echo "ANDROID_KEYSTORE_FILE=$KEYSTORE_PATH"
+              echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+              echo "ANDROID_STORE_PASSWORD=$ANDROID_STORE_PASSWORD"
+              echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets are incomplete; the release APK will be unsigned."
+          fi
+
+      - name: Normalize release version
+        id: version
+        shell: bash
+        env:
+          RELEASE_INPUT: ${{ inputs.version }}
+        run: |
+          VERSION="${RELEASE_INPUT#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "Invalid release version: use a value such as 1.0.0 or v1.0.0." >&2
+            exit 1
+          fi
+          CORE_VERSION="${VERSION%%[-+]*}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CORE_VERSION"
+          VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH + 1))
+          if (( VERSION_CODE > 2100000000 )); then
+            echo "Release version is too large for Android versionCode." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace \
+            -PreleaseVersion='${{ steps.version.outputs.version }}' \
+            -PreleaseVersionCode='${{ steps.version.outputs.version_code }}' 2>&1 | tee build-release.log
+
+      - name: Name release APK
+        shell: bash
+        run: |
+          APK_PATH="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          if [[ -z "$APK_PATH" ]]; then
+            echo "No release APK was produced." >&2
+            exit 1
+          fi
+          cp "$APK_PATH" "TRAP-THEORY-${{ steps.version.outputs.tag }}.apk"
+
+      - name: Publish GitHub Release with signed APK
+        if: steps.signing.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ steps.version.outputs.tag }}' "TRAP-THEORY-${{ steps.version.outputs.tag }}.apk" \
+            --title 'TRAP THEORY ${{ steps.version.outputs.tag }}' \
+            --notes 'Signed Android release APK. Install on a compatible Android device.'
+
+      - name: Publish GitHub Release with unsigned APK
+        if: steps.signing.outputs.available != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ steps.version.outputs.tag }}' "TRAP-THEORY-${{ steps.version.outputs.tag }}.apk" \
+            --title 'TRAP THEORY ${{ steps.version.outputs.tag }}' \
+            --notes 'Unsigned release APK. This package is not suitable for direct installation until it is signed. Configure the signing secrets to publish an installable signed APK.'
+
+      - name: Preserve release build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TRAP-THEORY-release-build-log
+          path: build-release.log
+          if-no-files-found: warn
+          retention-days: 7
